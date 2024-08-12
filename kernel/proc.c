@@ -93,7 +93,16 @@ static struct proc*
 allocproc(void)
 {
   struct proc *p;
-
+  // 初始化告警字段
+  if((p->alarm_trapframe = (struct trapframe*)kalloc()) == 0) {
+      freeproc(p);
+      release(&p->lock);
+      return 0;
+  }
+  p->is_alarming = 0;
+  p->alarm_interval = 0;
+  p->alarm_handler = 0;
+  p->ticks_count = 0;
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if(p->state == UNUSED) {
@@ -121,24 +130,6 @@ found:
     return 0;
   }
 
-  // Init the kernal page table
-  p->kernelpt = proc_kpt_init();
-  if(p->kernelpt == 0){
-    freeproc(p);
-    release(&p->lock);
-    return 0;
-  }
-
-  // Allocate a page for the process's kernel stack.
-  // Map it high in memory, followed by an invalid
-  // guard page.
-  char *pa = kalloc();
-  if(pa == 0)
-    panic("kalloc");
-  uint64 va = KSTACK((int) (p - proc));
-  uvmmap(p->kernelpt, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-  p->kstack = va;
-
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -154,9 +145,13 @@ found:
 static void
 freeproc(struct proc *p)
 {
-  // free the kernel stack in the RAM
-  uvmunmap(p->kernelpt, p->kstack, 1, 1);
-  p->kstack = 0;
+  if(p->alarm_trapframe)
+    kfree((void*)p->alarm_trapframe);
+  p->alarm_trapframe = 0;
+  p->is_alarming = 0;
+  p->alarm_interval = 0;
+  p->alarm_handler = 0;
+  p->ticks_count = 0;
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
@@ -264,15 +259,9 @@ growproc(int n)
 
   sz = p->sz;
   if(n > 0){
-    // 加上PLIC限制
-    if (PGROUNDUP(sz + n) >= PLIC){
-      return -1;
-    }
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
-    // 复制一份到内核页表
-    u2kvmcopy(p->pagetable, p->kernelpt, sz - n, sz);
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
@@ -301,9 +290,6 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
-
-  // 复制到新进程的内核页表
-  u2kvmcopy(np->pagetable, np->kernelpt, 0, np->sz);
 
   np->parent = p;
 
@@ -503,12 +489,8 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
-        // Store the kernal page table into the SATP
-        proc_inithart(p->kernelpt);
         swtch(&c->context, &p->context);
 
-        // Come back to the global kernel page table
-        kvminithart();
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
@@ -730,21 +712,4 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
-}
-void
-proc_freekernelpt(pagetable_t kernelpt)
-{
-  // similar to the freewalk method
-  // there are 2^9 = 512 PTEs in a page table.
-  for(int i = 0; i < 512; i++){
-    pte_t pte = kernelpt[i];
-    if(pte & PTE_V){
-      kernelpt[i] = 0;
-      if ((pte & (PTE_R|PTE_W|PTE_X)) == 0){
-        uint64 child = PTE2PA(pte);
-        proc_freekernelpt((pagetable_t)child);
-      }
-    }
-  }
-  kfree((void*)kernelpt);
 }

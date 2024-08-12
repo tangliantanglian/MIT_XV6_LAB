@@ -49,7 +49,7 @@ usertrap(void)
   
   // save user program counter.
   p->trapframe->epc = r_sepc();
-  
+  uint64 cause = r_scause();
   if(r_scause() == 8){
     // system call
 
@@ -67,7 +67,22 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if(cause == 13 || cause == 15){
+     // 处理页面错误
+    uint64 fault_va = r_stval();  // 产生页面错误的虚拟地址
+    char* pa;                     // 分配的物理地址
+    if(PGROUNDUP(p->trapframe->sp) - 1 < fault_va && fault_va < p->sz &&
+      (pa = kalloc()) != 0) {
+        memset(pa, 0, PGSIZE);
+        if(mappages(p->pagetable, PGROUNDDOWN(fault_va), PGSIZE, (uint64)pa, PTE_R | PTE_W | PTE_X | PTE_U) != 0) {
+          kfree(pa);
+          p->killed = 1;
+        }
+    } else {
+      // printf("usertrap(): out of memory!\n");
+      p->killed = 1;
+    }
+  }else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
@@ -77,23 +92,8 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2){
-    if(p->alarm_interval != 0 && ++p->ticks_count == p->alarm_interval && p->is_alarming == 0) {
-    // 保存寄存器内容
-    memmove(p->alarm_trapframe, p->trapframe, sizeof(struct trapframe));
-    // 更改陷阱帧中保留的程序计数器，注意一定要在保存寄存器内容后再设置epc
-    p->trapframe->epc = (uint64)p->alarm_handler;
-    p->ticks_count = 0;
-    p->is_alarming = 1;
-  }
-  yield();
-    if(++p->ticks_count == p->alarm_interval) {
-        // 更改陷阱帧中保留的程序计数器
-        p->trapframe->epc = (uint64)p->alarm_handler;
-        p->ticks_count = 0;
-    }
+  if(which_dev == 2)
     yield();
-  }
 
   usertrapret();
 }

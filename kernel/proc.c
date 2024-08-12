@@ -93,16 +93,7 @@ static struct proc*
 allocproc(void)
 {
   struct proc *p;
-  // 初始化告警字段
-  if((p->alarm_trapframe = (struct trapframe*)kalloc()) == 0) {
-      freeproc(p);
-      release(&p->lock);
-      return 0;
-  }
-  p->is_alarming = 0;
-  p->alarm_interval = 0;
-  p->alarm_handler = 0;
-  p->ticks_count = 0;
+
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if(p->state == UNUSED) {
@@ -145,13 +136,6 @@ found:
 static void
 freeproc(struct proc *p)
 {
-  if(p->alarm_trapframe)
-    kfree((void*)p->alarm_trapframe);
-  p->alarm_trapframe = 0;
-  p->is_alarming = 0;
-  p->alarm_interval = 0;
-  p->alarm_handler = 0;
-  p->ticks_count = 0;
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
@@ -480,9 +464,12 @@ scheduler(void)
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
     
-    int found = 0;
+    int nproc = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
+      if(p->state != UNUSED) {
+        nproc++;
+      }
       if(p->state == RUNNABLE) {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
@@ -494,19 +481,13 @@ scheduler(void)
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
-
-        found = 1;
       }
       release(&p->lock);
     }
-#if !defined (LAB_FS)
-    if(found == 0) {
+    if(nproc <= 2) {   // only init and sh exist
       intr_on();
       asm volatile("wfi");
     }
-#else
-    ;
-#endif
   }
 }
 

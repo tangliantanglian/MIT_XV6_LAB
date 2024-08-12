@@ -46,9 +46,18 @@ sys_sbrk(void)
 
   if(argint(0, &n) < 0)
     return -1;
-  addr = myproc()->sz;
-  if(growproc(n) < 0)
+  struct proc* p = myproc();
+  addr = p->sz;
+  uint64 sz = p->sz;
+  if(n > 0) {
+    // lazy allocation
+    p->sz += n;
+  } else if(sz + n > 0) {
+    sz = uvmdealloc(p->pagetable, sz, sz + n);
+    p->sz = sz;
+  } else {
     return -1;
+  }
   return addr;
 }
 
@@ -70,7 +79,6 @@ sys_sleep(void)
     sleep(&ticks, &tickslock);
   }
   release(&tickslock);
-  backtrace();
   return 0;
 }
 
@@ -95,18 +103,4 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
-}
-uint64
-sys_sigalarm(void) {
-  if(argint(0, &myproc()->alarm_interval) < 0 ||
-    argaddr(1, (uint64*)&myproc()->alarm_handler) < 0)
-    return -1;
-
-  return 0;
-}
-uint64
-sys_sigreturn(void) {
-  memmove(myproc()->trapframe, myproc()->alarm_trapframe, sizeof(struct trapframe));
-  myproc()->is_alarming = 0;
-  return 0;
 }

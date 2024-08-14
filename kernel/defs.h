@@ -63,10 +63,6 @@ void            ramdiskrw(struct buf*);
 void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
-int             cowpage(pagetable_t, uint64);
-void*           cowalloc(pagetable_t, uint64);
-int             krefcnt(void*);
-int             kaddrefcnt(void*);
 
 // log.c
 void            initlog(int, struct superblock*);
@@ -160,7 +156,6 @@ int             uartgetc(void);
 // vm.c
 void            kvminit(void);
 void            kvminithart(void);
-uint64          kvmpa(uint64);
 void            kvmmap(uint64, uint64, uint64, int);
 int             mappages(pagetable_t, uint64, uint64, uint64, int);
 pagetable_t     uvmcreate(void);

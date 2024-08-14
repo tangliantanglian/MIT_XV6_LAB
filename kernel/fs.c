@@ -381,36 +381,20 @@ bmap(struct inode *ip, uint bn)
   struct buf *bp;
 
   if(bn < NDIRECT){
-    ...
+    if((addr = ip->addrs[bn]) == 0)
+      ip->addrs[bn] = addr = balloc(ip->dev);
+    return addr;
   }
   bn -= NDIRECT;
 
   if(bn < NINDIRECT){
-    ...
-  }
-  bn -= NINDIRECT;
-
-  // 二级间接块的情况
-  if(bn < NDINDIRECT) {
-    int level2_idx = bn / NADDR_PER_BLOCK;  // 要查找的块号位于二级间接块中的位置
-    int level1_idx = bn % NADDR_PER_BLOCK;  // 要查找的块号位于一级间接块中的位置
-    // 读出二级间接块
-    if((addr = ip->addrs[NDIRECT + 1]) == 0)
-      ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev);
+    // Load indirect block, allocating if necessary.
+    if((addr = ip->addrs[NDIRECT]) == 0)
+      ip->addrs[NDIRECT] = addr = balloc(ip->dev);
     bp = bread(ip->dev, addr);
     a = (uint*)bp->data;
-
-    if((addr = a[level2_idx]) == 0) {
-      a[level2_idx] = addr = balloc(ip->dev);
-      // 更改了当前块的内容，标记以供后续写回磁盘
-      log_write(bp);
-    }
-    brelse(bp);
-
-    bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
-    if((addr = a[level1_idx]) == 0) {
-      a[level1_idx] = addr = balloc(ip->dev);
+    if((addr = a[bn]) == 0){
+      a[bn] = addr = balloc(ip->dev);
       log_write(bp);
     }
     brelse(bp);
@@ -447,29 +431,7 @@ itrunc(struct inode *ip)
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
   }
-  struct buf* bp1;
-  uint* a1;
-  if(ip->addrs[NDIRECT + 1]) {
-    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
-    a = (uint*)bp->data;
-    for(i = 0; i < NADDR_PER_BLOCK; i++) {
-      // 每个一级间接块的操作都类似于上面的
-      // if(ip->addrs[NDIRECT])中的内容
-      if(a[i]) {
-        bp1 = bread(ip->dev, a[i]);
-        a1 = (uint*)bp1->data;
-        for(j = 0; j < NADDR_PER_BLOCK; j++) {
-          if(a1[j])
-            bfree(ip->dev, a1[j]);
-        }
-        brelse(bp1);
-        bfree(ip->dev, a[i]);
-      }
-    }
-    brelse(bp);
-    bfree(ip->dev, ip->addrs[NDIRECT + 1]);
-    ip->addrs[NDIRECT + 1] = 0;
-  }
+
   ip->size = 0;
   iupdate(ip);
 }

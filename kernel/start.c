@@ -3,7 +3,7 @@
 #include "memlayout.h"
 #include "riscv.h"
 #include "defs.h"
-#define T_SYMLINK 4
+
 void main();
 void timerinit();
 
